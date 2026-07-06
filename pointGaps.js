@@ -9,6 +9,7 @@
   const statGroups = document.getElementById('statGroups');
   const statSegs = document.getElementById('statSegs');
   const statPoints = document.getElementById('statPoints');
+  const statSelected = document.getElementById('statSelected');
   const segList = document.getElementById('segList');
   const toast = document.getElementById('toast');
 
@@ -26,6 +27,8 @@
   let center = { x: 0, y: 0 };
   let scaleFactor = 1.0;     // cumulative spacing multiplier (position)
   let sizeFactor = 1.0;      // cumulative point-size multiplier (independent of spacing)
+  let selectedPoint = null;  // current clicked point metadata
+  let renderPoints = [];     // points in current canvas coordinate space for hit-test
   const PADDING = 40;        // canvas padding around bounding box
 
   function showToast(msg, isWarn){
@@ -44,6 +47,22 @@
     sizeResetBtn.disabled = !enabled;
   }
   setControlsEnabled(false);
+
+  function updateSelectedReadout(){
+    if (!statSelected) return;
+    if (!selectedPoint) {
+      statSelected.textContent = '없음';
+      return;
+    }
+    statSelected.textContent = selectedPoint.segmentId + ' · #' + (selectedPoint.pointIndex + 1);
+  }
+
+  function isSelectedPoint(pointMeta){
+    return !!selectedPoint &&
+      selectedPoint.groupIndex === pointMeta.groupIndex &&
+      selectedPoint.segmentIndex === pointMeta.segmentIndex &&
+      selectedPoint.pointIndex === pointMeta.pointIndex;
+  }
 
   function allPoints(data){
     const pts = [];
@@ -79,6 +98,7 @@
     originalData = data;
     scaleFactor = 1.0;
     sizeFactor = 1.0;
+    selectedPoint = null;
 
     const b = computeBounds(pts);
     center = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
@@ -86,8 +106,10 @@
     updateStats();
     updateReadout();
     updateSizeReadout();
+    updateSelectedReadout();
     setControlsEnabled(true);
     emptyState.style.display = 'none';
+    canvas.style.cursor = 'crosshair';
     draw();
     showToast('JSON을 불러왔습니다 (' + pts.length + '개 포인트)');
   }
@@ -140,6 +162,7 @@
 
   function draw(){
     if (!originalData) return;
+    renderPoints = [];
 
     // Recompute bounds using scaled coordinates to size/fit the canvas
     const pts = allPoints(originalData).map(scaledXY);
@@ -162,13 +185,23 @@
     const offY = PADDING - b.minY;
 
     let colorIdx = 0;
-    (originalData.groups || []).forEach(g => {
-      (g.segments || []).forEach(seg => {
+    (originalData.groups || []).forEach((g, groupIndex) => {
+      (g.segments || []).forEach((seg, segmentIndex) => {
         const color = PALETTE[colorIdx % PALETTE.length];
         colorIdx++;
-        const segPts = (seg.points || []).map(p => {
+        const segPts = (seg.points || []).map((p, pointIndex) => {
           const s = scaledXY(p);
-          return { x: s.x + offX, y: s.y + offY, size: p.size, canConnect: p.canConnect, mergeState: p.mergeState };
+          return {
+            x: s.x + offX,
+            y: s.y + offY,
+            size: p.size,
+            canConnect: p.canConnect,
+            mergeState: p.mergeState,
+            groupIndex,
+            segmentIndex,
+            pointIndex,
+            segmentId: seg.id
+          };
         });
 
         // polyline
@@ -187,6 +220,8 @@
         // sizeFactor scales this independently from the spacing scaleFactor above
         segPts.forEach(p => {
           const side = Math.max(1, ((p.size || 4) / 2) * sizeFactor);
+          p.side = side;
+          renderPoints.push(p);
           ctx.fillStyle = p.canConnect ? '#ffffff' : color;
           ctx.fillRect(p.x - side / 2, p.y - side / 2, side, side);
           if (p.canConnect) {
@@ -194,9 +229,40 @@
             ctx.lineWidth = 1;
             ctx.strokeRect(p.x - side / 2 - 1.5, p.y - side / 2 - 1.5, side + 3, side + 3);
           }
+          if (isSelectedPoint(p)) {
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(p.x - side / 2 - 4, p.y - side / 2 - 4, side + 8, side + 8);
+          }
         });
       });
     });
+  }
+
+  function getCanvasXY(evt){
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: evt.clientX - rect.left,
+      y: evt.clientY - rect.top
+    };
+  }
+
+  function findPointAt(x, y){
+    let nearest = null;
+    let nearestDistSq = Infinity;
+
+    renderPoints.forEach(p => {
+      const pickRadius = Math.max(6, p.side / 2 + 4);
+      const dx = x - p.x;
+      const dy = y - p.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= pickRadius * pickRadius && distSq < nearestDistSq) {
+        nearest = p;
+        nearestDistSq = distSq;
+      }
+    });
+
+    return nearest;
   }
 
   function adjustScale(deltaPercent){
@@ -247,5 +313,37 @@
     draw();
   });
 
+  canvas.addEventListener('click', (evt) => {
+    if (!originalData) return;
+
+    const pos = getCanvasXY(evt);
+    const found = findPointAt(pos.x, pos.y);
+
+    if (!found) {
+      selectedPoint = null;
+      updateSelectedReadout();
+      draw();
+      return;
+    }
+
+    selectedPoint = {
+      groupIndex: found.groupIndex,
+      segmentIndex: found.segmentIndex,
+      pointIndex: found.pointIndex,
+      segmentId: found.segmentId,
+      x: found.x,
+      y: found.y
+    };
+    updateSelectedReadout();
+    draw();
+  });
+
   window.addEventListener('resize', () => { if (originalData) draw(); });
+
+  // Expose selected-point snapshot for future features (e.g. selected-point-based spacing).
+  window.pointGapViewer = {
+    getSelectedPoint: function(){
+      return selectedPoint ? Object.assign({}, selectedPoint) : null;
+    }
+  };
 })();
