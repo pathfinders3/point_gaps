@@ -11,6 +11,7 @@
   const statPoints = document.getElementById('statPoints');
   const statSelected = document.getElementById('statSelected');
   const statAnchor = document.getElementById('statAnchor');
+  const statExcluded = document.getElementById('statExcluded');
   const segList = document.getElementById('segList');
   const toast = document.getElementById('toast');
 
@@ -30,6 +31,7 @@
   let sizeFactor = 1.0;      // cumulative point-size multiplier (independent of spacing)
   let selectedPoint = null;  // current clicked point metadata
   let anchorSegment = null;  // fixed segment used as spacing reference (set by F1)
+  let excludedSegments = new Set(); // segments excluded from spacing offset (set by F2)
   let renderPoints = [];     // points in current canvas coordinate space for hit-test
   const PADDING = 40;        // canvas padding around bounding box
 
@@ -66,6 +68,35 @@
       return;
     }
     statAnchor.textContent = anchorSegment.segmentId;
+  }
+
+  function segmentKey(meta){
+    if (!meta) return '';
+    return meta.groupIndex + ':' + meta.segmentIndex;
+  }
+
+  function isExcludedSegment(meta){
+    if (!meta) return false;
+    return excludedSegments.has(segmentKey(meta));
+  }
+
+  function updateExcludedReadout(){
+    if (!statExcluded) return;
+    const ids = [];
+    excludedSegments.forEach((key) => {
+      const parts = key.split(':');
+      const groupIndex = Number(parts[0]);
+      const segmentIndex = Number(parts[1]);
+      const group = (originalData && originalData.groups ? originalData.groups[groupIndex] : null);
+      const seg = (group && group.segments ? group.segments[segmentIndex] : null);
+      if (seg && seg.id) ids.push(seg.id);
+    });
+
+    if (ids.length === 0) {
+      statExcluded.textContent = '없음';
+      return;
+    }
+    statExcluded.textContent = ids.join(', ');
   }
 
   function isSelectedPoint(pointMeta){
@@ -152,6 +183,7 @@
     sizeFactor = 1.0;
     selectedPoint = null;
     anchorSegment = null;
+    excludedSegments = new Set();
 
     const b = computeBounds(pts);
     center = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
@@ -161,6 +193,7 @@
     updateSizeReadout();
     updateSelectedReadout();
     updateAnchorReadout();
+    updateExcludedReadout();
     setControlsEnabled(true);
     emptyState.style.display = 'none';
     canvas.style.cursor = 'crosshair';
@@ -210,6 +243,10 @@
   // away/toward the anchor segment in X while preserving each segment's size.
   // If no anchor segment is set, move all segments by the same X offset.
   function scaledXY(p, pointMeta){
+    if (isExcludedSegment(pointMeta)) {
+      return { x: p.x, y: p.y };
+    }
+
     if (anchorSegment && pointMeta) {
       const anchorCenterX = getAnchorCenterX();
       if (anchorCenterX === null) {
@@ -450,6 +487,35 @@
     showToast('기준 다각선 지정: ' + anchorSegment.segmentId);
   });
 
+  window.addEventListener('keydown', (evt) => {
+    if (evt.key !== 'F2') return;
+    evt.preventDefault();
+
+    if (!originalData) {
+      showToast('먼저 JSON 데이터를 불러와주세요', true);
+      return;
+    }
+
+    if (!selectedPoint) {
+      showToast('제외할 다각선의 점을 먼저 선택해주세요', true);
+      return;
+    }
+
+    const key = segmentKey(selectedPoint);
+    const segmentId = selectedPoint.segmentId;
+
+    if (excludedSegments.has(key)) {
+      excludedSegments.delete(key);
+      showToast('오프셋 제외 해제: ' + segmentId);
+    } else {
+      excludedSegments.add(key);
+      showToast('오프셋 제외 지정: ' + segmentId);
+    }
+
+    updateExcludedReadout();
+    draw();
+  });
+
   window.addEventListener('resize', () => { if (originalData) draw(); });
 
   // Expose selected-point snapshot for future features (e.g. selected-point-based spacing).
@@ -459,6 +525,9 @@
     },
     getAnchorSegment: function(){
       return anchorSegment ? Object.assign({}, anchorSegment) : null;
+    },
+    getExcludedSegments: function(){
+      return Array.from(excludedSegments.values());
     }
   };
 })();
