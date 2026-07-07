@@ -74,6 +74,27 @@
     return pts;
   }
 
+  function allPointsWithMeta(data){
+    const pts = [];
+    (data.groups || []).forEach((g, groupIndex) => {
+      (g.segments || []).forEach((seg, segmentIndex) => {
+        (seg.points || []).forEach((p, pointIndex) => {
+          pts.push({ p, groupIndex, segmentIndex, pointIndex, segmentId: seg.id });
+        });
+      });
+    });
+    return pts;
+  }
+
+  function getSourcePoint(meta){
+    if (!originalData || !meta) return null;
+    const group = (originalData.groups || [])[meta.groupIndex];
+    if (!group) return null;
+    const seg = (group.segments || [])[meta.segmentIndex];
+    if (!seg) return null;
+    return (seg.points || [])[meta.pointIndex] || null;
+  }
+
   function computeBounds(pts){
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     pts.forEach(p => {
@@ -150,10 +171,30 @@
     statSizeScale.textContent = pct + '%';
   }
 
-  // Compute scaled point position: push/pull each point away from the
-  // shape's center by scaleFactor, so spacing between points grows/shrinks
-  // uniformly while the overall shape (angles) is preserved.
-  function scaledXY(p){
+  // If a point is selected, adjust only X distances from that selected point
+  // and skip points that belong to the selected segment.
+  // Otherwise, keep the original center-based uniform scaling behavior.
+  function scaledXY(p, pointMeta){
+    if (selectedPoint && pointMeta) {
+      const selectedSource = getSourcePoint(selectedPoint);
+      if (!selectedSource) {
+        return { x: p.x, y: p.y };
+      }
+
+      const isSelectedSegment =
+        pointMeta.groupIndex === selectedPoint.groupIndex &&
+        pointMeta.segmentIndex === selectedPoint.segmentIndex;
+
+      if (isSelectedSegment) {
+        return { x: p.x, y: p.y };
+      }
+
+      return {
+        x: selectedSource.x + (p.x - selectedSource.x) * scaleFactor,
+        y: p.y
+      };
+    }
+
     return {
       x: center.x + (p.x - center.x) * scaleFactor,
       y: center.y + (p.y - center.y) * scaleFactor
@@ -165,7 +206,9 @@
     renderPoints = [];
 
     // Recompute bounds using scaled coordinates to size/fit the canvas
-    const pts = allPoints(originalData).map(scaledXY);
+    const pts = allPointsWithMeta(originalData).map(({ p, groupIndex, segmentIndex, pointIndex, segmentId }) =>
+      scaledXY(p, { groupIndex, segmentIndex, pointIndex, segmentId })
+    );
     const b = computeBounds(pts);
     const w = Math.max(1, b.maxX - b.minX);
     const h = Math.max(1, b.maxY - b.minY);
@@ -190,7 +233,7 @@
         const color = PALETTE[colorIdx % PALETTE.length];
         colorIdx++;
         const segPts = (seg.points || []).map((p, pointIndex) => {
-          const s = scaledXY(p);
+          const s = scaledXY(p, { groupIndex, segmentIndex, pointIndex, segmentId: seg.id });
           return {
             x: s.x + offX,
             y: s.y + offY,
@@ -332,7 +375,9 @@
       pointIndex: found.pointIndex,
       segmentId: found.segmentId,
       x: found.x,
-      y: found.y
+      y: found.y,
+      sourceX: getSourcePoint(found) ? getSourcePoint(found).x : null,
+      sourceY: getSourcePoint(found) ? getSourcePoint(found).y : null
     };
     updateSelectedReadout();
     draw();
