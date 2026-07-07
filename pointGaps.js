@@ -25,7 +25,7 @@
 
   let originalData = null;   // parsed JSON, untouched
   let center = { x: 0, y: 0 };
-  let scaleFactor = 1.0;     // cumulative spacing multiplier (position)
+  let spacingOffsetX = 0;    // cumulative spacing offset in px (X direction)
   let sizeFactor = 1.0;      // cumulative point-size multiplier (independent of spacing)
   let selectedPoint = null;  // current clicked point metadata
   let renderPoints = [];     // points in current canvas coordinate space for hit-test
@@ -95,6 +95,21 @@
     return (seg.points || [])[meta.pointIndex] || null;
   }
 
+  function getSegment(meta){
+    if (!originalData || !meta) return null;
+    const group = (originalData.groups || [])[meta.groupIndex];
+    if (!group) return null;
+    return (group.segments || [])[meta.segmentIndex] || null;
+  }
+
+  function getSegmentCenterX(meta){
+    const seg = getSegment(meta);
+    if (!seg || !Array.isArray(seg.points) || seg.points.length === 0) return null;
+    let sum = 0;
+    seg.points.forEach(pt => { sum += pt.x; });
+    return sum / seg.points.length;
+  }
+
   function computeBounds(pts){
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     pts.forEach(p => {
@@ -117,7 +132,7 @@
       return;
     }
     originalData = data;
-    scaleFactor = 1.0;
+    spacingOffsetX = 0;
     sizeFactor = 1.0;
     selectedPoint = null;
 
@@ -160,9 +175,10 @@
   }
 
   function updateReadout(){
-    const pct = Math.round(scaleFactor * 100);
-    scaleReadout.textContent = pct + '%';
-    statScale.textContent = pct + '%';
+    const px = Math.round(spacingOffsetX);
+    const txt = (px >= 0 ? '+' : '') + px + 'px';
+    scaleReadout.textContent = txt;
+    statScale.textContent = txt;
   }
 
   function updateSizeReadout(){
@@ -171,9 +187,10 @@
     statSizeScale.textContent = pct + '%';
   }
 
-  // If a point is selected, adjust only X distances from that selected point
-  // and skip points that belong to the selected segment.
-  // Otherwise, keep the original center-based uniform scaling behavior.
+  // Spacing control always uses X offset translation only (no scaling).
+  // If a point is selected, only non-selected segments move away/toward
+  // the selected point in X while preserving each segment's size.
+  // If no point is selected, move all segments by the same X offset.
   function scaledXY(p, pointMeta){
     if (selectedPoint && pointMeta) {
       const selectedSource = getSourcePoint(selectedPoint);
@@ -189,15 +206,22 @@
         return { x: p.x, y: p.y };
       }
 
+      const segCenterX = getSegmentCenterX(pointMeta);
+      if (segCenterX === null) {
+        return { x: p.x, y: p.y };
+      }
+
+      const offsetX = segCenterX >= selectedSource.x ? spacingOffsetX : -spacingOffsetX;
+
       return {
-        x: selectedSource.x + (p.x - selectedSource.x) * scaleFactor,
+        x: p.x + offsetX,
         y: p.y
       };
     }
 
     return {
-      x: center.x + (p.x - center.x) * scaleFactor,
-      y: center.y + (p.y - center.y) * scaleFactor
+      x: p.x + spacingOffsetX,
+      y: p.y
     };
   }
 
@@ -260,7 +284,7 @@
         ctx.globalAlpha = 1;
 
         // points: size:4 -> occupies 2x2 px square (side = size/2), centered on point
-        // sizeFactor scales this independently from the spacing scaleFactor above
+        // sizeFactor scales this independently from spacing offset translation above
         segPts.forEach(p => {
           const side = Math.max(1, ((p.size || 4) / 2) * sizeFactor);
           p.side = side;
@@ -309,7 +333,7 @@
   }
 
   function adjustScale(deltaPercent){
-    scaleFactor = Math.max(0.05, scaleFactor + deltaPercent / 100);
+    spacingOffsetX += deltaPercent;
     updateReadout();
     draw();
   }
@@ -343,7 +367,7 @@
   incBtn.addEventListener('click', () => adjustScale(10));
   decBtn.addEventListener('click', () => adjustScale(-10));
   resetBtn.addEventListener('click', () => {
-    scaleFactor = 1.0;
+    spacingOffsetX = 0;
     updateReadout();
     draw();
   });
