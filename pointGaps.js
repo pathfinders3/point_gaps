@@ -16,6 +16,7 @@
   const toast = document.getElementById('toast');
 
   const pasteBtn = document.getElementById('pasteBtn');
+  const exportBtn = document.getElementById('exportBtn');
   const incBtn = document.getElementById('incBtn');
   const decBtn = document.getElementById('decBtn');
   const resetBtn = document.getElementById('resetBtn');
@@ -44,6 +45,7 @@
   }
 
   function setControlsEnabled(enabled){
+    exportBtn.disabled = !enabled;
     incBtn.disabled = !enabled;
     decBtn.disabled = !enabled;
     resetBtn.disabled = !enabled;
@@ -408,6 +410,30 @@
     draw();
   }
 
+  function buildAdjustedData(){
+    if (!originalData) return null;
+
+    return {
+      groups: (originalData.groups || []).map((group, groupIndex) => ({
+        segments: (group.segments || []).map((seg, segmentIndex) => ({
+          id: seg.id,
+          points: (seg.points || []).map((pt, pointIndex) => {
+            const moved = scaledXY(pt, {
+              groupIndex,
+              segmentIndex,
+              pointIndex,
+              segmentId: seg.id
+            });
+            return Object.assign({}, pt, {
+              x: moved.x,
+              y: moved.y
+            });
+          })
+        }))
+      }))
+    };
+  }
+
   pasteBtn.addEventListener('click', async () => {
     try {
       const text = await navigator.clipboard.readText();
@@ -425,6 +451,23 @@
       loadData(data);
     } catch(err) {
       showToast('클립보드 접근이 차단되었습니다. 권한을 허용해주세요.', true);
+    }
+  });
+
+  exportBtn.addEventListener('click', async () => {
+    if (!originalData) {
+      showToast('먼저 JSON 데이터를 불러와주세요', true);
+      return;
+    }
+
+    const adjusted = buildAdjustedData();
+    const jsonText = JSON.stringify(adjusted, null, 2);
+
+    try {
+      await navigator.clipboard.writeText(jsonText);
+      showToast('조정된 JSON을 클립보드에 복사했습니다');
+    } catch (err) {
+      showToast('JSON 내보내기에 실패했습니다. 클립보드 권한을 확인해주세요.', true);
     }
   });
 
