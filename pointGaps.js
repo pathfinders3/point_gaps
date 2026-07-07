@@ -10,6 +10,7 @@
   const statSegs = document.getElementById('statSegs');
   const statPoints = document.getElementById('statPoints');
   const statSelected = document.getElementById('statSelected');
+  const statAnchor = document.getElementById('statAnchor');
   const segList = document.getElementById('segList');
   const toast = document.getElementById('toast');
 
@@ -28,6 +29,7 @@
   let spacingOffsetX = 0;    // cumulative spacing offset in px (X direction)
   let sizeFactor = 1.0;      // cumulative point-size multiplier (independent of spacing)
   let selectedPoint = null;  // current clicked point metadata
+  let anchorSegment = null;  // fixed segment used as spacing reference (set by F1)
   let renderPoints = [];     // points in current canvas coordinate space for hit-test
   const PADDING = 40;        // canvas padding around bounding box
 
@@ -55,6 +57,15 @@
       return;
     }
     statSelected.textContent = selectedPoint.segmentId + ' · #' + (selectedPoint.pointIndex + 1);
+  }
+
+  function updateAnchorReadout(){
+    if (!statAnchor) return;
+    if (!anchorSegment) {
+      statAnchor.textContent = '없음';
+      return;
+    }
+    statAnchor.textContent = anchorSegment.segmentId;
   }
 
   function isSelectedPoint(pointMeta){
@@ -110,6 +121,11 @@
     return sum / seg.points.length;
   }
 
+  function getAnchorCenterX(){
+    if (!anchorSegment) return null;
+    return getSegmentCenterX(anchorSegment);
+  }
+
   function computeBounds(pts){
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     pts.forEach(p => {
@@ -135,6 +151,7 @@
     spacingOffsetX = 0;
     sizeFactor = 1.0;
     selectedPoint = null;
+    anchorSegment = null;
 
     const b = computeBounds(pts);
     center = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
@@ -143,6 +160,7 @@
     updateReadout();
     updateSizeReadout();
     updateSelectedReadout();
+    updateAnchorReadout();
     setControlsEnabled(true);
     emptyState.style.display = 'none';
     canvas.style.cursor = 'crosshair';
@@ -188,21 +206,21 @@
   }
 
   // Spacing control always uses X offset translation only (no scaling).
-  // If a point is selected, only non-selected segments move away/toward
-  // the selected point in X while preserving each segment's size.
-  // If no point is selected, move all segments by the same X offset.
+  // If an anchor segment is set (F1), only non-anchor segments move
+  // away/toward the anchor segment in X while preserving each segment's size.
+  // If no anchor segment is set, move all segments by the same X offset.
   function scaledXY(p, pointMeta){
-    if (selectedPoint && pointMeta) {
-      const selectedSource = getSourcePoint(selectedPoint);
-      if (!selectedSource) {
+    if (anchorSegment && pointMeta) {
+      const anchorCenterX = getAnchorCenterX();
+      if (anchorCenterX === null) {
         return { x: p.x, y: p.y };
       }
 
-      const isSelectedSegment =
-        pointMeta.groupIndex === selectedPoint.groupIndex &&
-        pointMeta.segmentIndex === selectedPoint.segmentIndex;
+      const isAnchorSegment =
+        pointMeta.groupIndex === anchorSegment.groupIndex &&
+        pointMeta.segmentIndex === anchorSegment.segmentIndex;
 
-      if (isSelectedSegment) {
+      if (isAnchorSegment) {
         return { x: p.x, y: p.y };
       }
 
@@ -211,7 +229,7 @@
         return { x: p.x, y: p.y };
       }
 
-      const offsetX = segCenterX >= selectedSource.x ? spacingOffsetX : -spacingOffsetX;
+      const offsetX = segCenterX >= anchorCenterX ? spacingOffsetX : -spacingOffsetX;
 
       return {
         x: p.x + offsetX,
@@ -407,12 +425,40 @@
     draw();
   });
 
+  window.addEventListener('keydown', (evt) => {
+    if (evt.key !== 'F1') return;
+    evt.preventDefault();
+
+    if (!originalData) {
+      showToast('먼저 JSON 데이터를 불러와주세요', true);
+      return;
+    }
+
+    if (!selectedPoint) {
+      showToast('기준으로 지정할 다각선의 점을 먼저 선택해주세요', true);
+      return;
+    }
+
+    anchorSegment = {
+      groupIndex: selectedPoint.groupIndex,
+      segmentIndex: selectedPoint.segmentIndex,
+      segmentId: selectedPoint.segmentId
+    };
+
+    updateAnchorReadout();
+    draw();
+    showToast('기준 다각선 지정: ' + anchorSegment.segmentId);
+  });
+
   window.addEventListener('resize', () => { if (originalData) draw(); });
 
   // Expose selected-point snapshot for future features (e.g. selected-point-based spacing).
   window.pointGapViewer = {
     getSelectedPoint: function(){
       return selectedPoint ? Object.assign({}, selectedPoint) : null;
+    },
+    getAnchorSegment: function(){
+      return anchorSegment ? Object.assign({}, anchorSegment) : null;
     }
   };
 })();
