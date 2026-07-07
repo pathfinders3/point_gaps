@@ -24,6 +24,7 @@
   const sizeResetBtn = document.getElementById('sizeResetBtn');
 
   const PALETTE = ['#5ee6c8', '#ff8a65', '#8ab4ff', '#e6c85e', '#c88ae6', '#6be675'];
+  const EXCLUDED_STROKE = '#ff4d6d';
 
   let originalData = null;   // parsed JSON, untouched
   let center = { x: 0, y: 0 };
@@ -310,6 +311,7 @@
     (originalData.groups || []).forEach((g, groupIndex) => {
       (g.segments || []).forEach((seg, segmentIndex) => {
         const color = PALETTE[colorIdx % PALETTE.length];
+        const excluded = isExcludedSegment({ groupIndex, segmentIndex });
         colorIdx++;
         const segPts = (seg.points || []).map((p, pointIndex) => {
           const s = scaledXY(p, { groupIndex, segmentIndex, pointIndex, segmentId: seg.id });
@@ -332,9 +334,9 @@
           if (i === 0) ctx.moveTo(p.x, p.y);
           else ctx.lineTo(p.x, p.y);
         });
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.85;
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = excluded ? EXCLUDED_STROKE : color;
+        ctx.globalAlpha = excluded ? 1 : 0.85;
+        ctx.lineWidth = excluded ? 2.2 : 1.5;
         ctx.stroke();
         ctx.globalAlpha = 1;
 
@@ -346,6 +348,13 @@
           renderPoints.push(p);
           ctx.fillStyle = p.canConnect ? '#ffffff' : color;
           ctx.fillRect(p.x - side / 2, p.y - side / 2, side, side);
+
+          if (excluded) {
+            ctx.strokeStyle = EXCLUDED_STROKE;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(p.x - side / 2 - 3, p.y - side / 2 - 3, side + 6, side + 6);
+          }
+
           if (p.canConnect) {
             ctx.strokeStyle = color;
             ctx.lineWidth = 1;
