@@ -26,6 +26,7 @@
 
   const PALETTE = ['#5ee6c8', '#ff8a65', '#8ab4ff', '#e6c85e', '#c88ae6', '#6be675'];
   const EXCLUDED_STROKE = '#ff4d6d';
+  const STORAGE_KEY = 'pointGapViewerData';
 
   let originalData = null;   // parsed JSON, untouched
   let center = { x: 0, y: 0 };
@@ -202,6 +203,40 @@
     canvas.style.cursor = 'crosshair';
     draw();
     showToast('JSON을 불러왔습니다 (' + pts.length + '개 포인트)');
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (err) {
+      showToast('브라우저 저장소에 저장하지 못했습니다', true);
+    }
+  }
+
+  function restoreDataFromStorage(){
+    let savedText = '';
+
+    try {
+      savedText = localStorage.getItem(STORAGE_KEY) || '';
+    } catch (err) {
+      return;
+    }
+
+    if (!savedText) {
+      showToast('저장된 다각선 데이터가 없습니다');
+      return;
+    }
+
+    try {
+      const savedData = JSON.parse(savedText);
+      loadData(savedData);
+      showToast('저장된 다각선 데이터를 불러왔습니다');
+    } catch (err) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (removeErr) {
+        // noop
+      }
+      showToast('저장된 데이터가 손상되어 초기화했습니다', true);
+    }
   }
 
   function updateStats(){
@@ -569,6 +604,8 @@
   });
 
   window.addEventListener('resize', () => { if (originalData) draw(); });
+
+  restoreDataFromStorage();
 
   // Expose selected-point snapshot for future features (e.g. selected-point-based spacing).
   window.pointGapViewer = {
